@@ -1,0 +1,79 @@
+name: Remote SSH via Termux
+
+on:
+  workflow_dispatch: # Allows you to run this workflow manually
+
+jobs:
+  build:
+    runs-on: ubuntu-latest # We're using a standard Ubuntu machine
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Setup SSH Server and User (Fixed)
+        run: |
+          # Install OpenSSH Server
+          sudo apt-get update
+          sudo apt-get install -y openssh-server
+          sudo service ssh start
+
+          # Create a new user 'runner' ONLY if it does not exist
+          if ! id "runner" &>/dev/null; then
+              echo "User 'runner' does not exist. Creating now..."
+              sudo useradd -m -s /bin/bash runner
+              sudo usermod -aG sudo runner
+              echo "runner:YOUR_STRONG_PASSWORD" | sudo chpasswd
+              echo "Password for user 'runner' is set."
+          else
+              echo "User 'runner' already exists. Resetting password to be safe."
+              # If user exists, just ensure the password is correct
+              echo "runner:YOUR_STRONG_PASSWORD" | sudo chpasswd
+          fi
+
+      - name: Setup ngrok Tunnel 🚀
+        run: |
+          # Download and setup ngrok
+          curl -s https://ngrok-agent.s3.amazonaws.com/ngrok.asc | sudo tee /etc/apt/trusted.gpg.d/ngrok.asc >/dev/null
+          echo "deb https://ngrok-agent.s3.amazonaws.com buster main" | sudo tee /etc/apt/sources.list.d/ngrok.list
+          sudo apt update
+          sudo apt install ngrok
+
+          # Add your ngrok authtoken from GitHub Secrets
+          # IMPORTANT: Store this as a GitHub Secret named NGROK_AUTHTOKEN
+          ngrok config add-authtoken ${{ secrets.NGROK_AUTHTOKEN }}
+          
+          # Start ngrok in the background to expose SSH port 22
+          # Using --log=stderr to prevent logs from interfering with stdout parsing
+          ngrok tcp 22 --log=stderr &
+          sleep 10 # Give ngrok some time to start
+
+          # Get the public URL from the ngrok API and print it
+          # Added retries to make it more reliable
+          for i in {1..5}; do
+            PUBLIC_URL=$(curl -s http://localhost:4040/api/tunnels | jq -r '.tunnels[] | select(.proto=="tcp") | .public_url')
+            if [ -n "$PUBLIC_URL" ]; then
+              break
+            fi
+            echo "Waiting for ngrok tunnel to be ready... (attempt $i)"
+            sleep 5
+          done
+
+          if [ -z "$PUBLIC_URL" ]; then
+            echo "Error: Could not get ngrok public URL after several attempts."
+            exit 1
+          fi
+
+          echo "=========================================================================="
+          echo "✅ ngrok tunnel is live! Connect using the command below."
+          echo "To connect from your terminal (like Termux), use:"
+          echo "ssh runner@${PUBLIC_URL#tcp://}"
+          echo "The password is the one you set in the workflow file."
+          echo "=========================================================================="
+          
+      - name: Keep Action Alive
+        run: |
+          echo "Action is running. Press Ctrl+C or cancel the workflow in GitHub to stop it."
+          # This keeps the runner alive for 6 hours (GitHub's max time for a job)
+          sleep 21600
+
