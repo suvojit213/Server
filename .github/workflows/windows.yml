@@ -1,78 +1,83 @@
-name: Remote SSH via Termux
+name: Remote SSH via Windows
 
 on:
   workflow_dispatch: # Allows you to run this workflow manually
 
 jobs:
   build:
-    runs-on: windows-latest # We're using a standard Ubuntu machine
+    runs-on: windows-latest # We're using a standard Windows machine
 
     steps:
       - name: Checkout
         uses: actions/checkout@v3
 
-      - name: Setup SSH Server and User (Fixed)
+      - name: Setup SSH Server and User
         run: |
           # Install OpenSSH Server
-          sudo apt-get update
-          sudo apt-get install -y openssh-server
-          sudo service ssh start
+          Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0
+          Start-Service sshd
+          Set-Service -Name sshd -StartupType Automatic
 
-          # Create a new user 'runner' ONLY if it does not exist
-          if ! id "runner" &>/dev/null; then
-              echo "User 'runner' does not exist. Creating now..."
-              sudo useradd -m -s /bin/bash runner
-              sudo usermod -aG sudo runner
-              echo "runner:YOUR_STRONG_PASSWORD" | sudo chpasswd
-              echo "Password for user 'runner' is set."
-          else
-              echo "User 'runner' already exists. Resetting password to be safe."
-              # If user exists, just ensure the password is correct
-              echo "runner:YOUR_STRONG_PASSWORD" | sudo chpasswd
-          fi
+          # Create a new user 'runner' and add to Administrators group
+          # IMPORTANT: Change 'YOUR_STRONG_PASSWORD' to a secure password
+          try {
+              $user = [ADSI]"WinNT://localhost/runner,user"
+              Write-Host "User 'runner' already exists. Resetting password to be safe."
+              net user runner YOUR_STRONG_PASSWORD
+          } catch {
+              Write-Host "User 'runner' does not exist. Creating now..."
+              net user runner YOUR_STRONG_PASSWORD /add
+              net localgroup administrators runner /add
+          }
+        shell: powershell
 
       - name: Setup ngrok Tunnel 🚀
         run: |
           # Download and setup ngrok
-          curl -s https://ngrok-agent.s3.amazonaws.com/ngrok.asc | sudo tee /etc/apt/trusted.gpg.d/ngrok.asc >/dev/null
-          echo "deb https://ngrok-agent.s3.amazonaws.com buster main" | sudo tee /etc/apt/sources.list.d/ngrok.list
-          sudo apt update
-          sudo apt install ngrok
+          Invoke-WebRequest -Uri "https://bin.equinox.io/c/4VmDzA7iaHb/ngrok-stable-windows-amd64.zip" -OutFile "ngrok.zip"
+          Expand-Archive -Path "ngrok.zip" -DestinationPath "."
 
           # Add your ngrok authtoken from GitHub Secrets
           # IMPORTANT: Store this as a GitHub Secret named NGROK_AUTHTOKEN
-          ngrok config add-authtoken ${{ secrets.NGROK_AUTHTOKEN }}
+          .\ngrok.exe config add-authtoken ${{ secrets.NGROK_AUTHTOKEN }}
           
           # Start ngrok in the background to expose SSH port 22
-          # Using --log=stderr to prevent logs from interfering with stdout parsing
-          ngrok tcp 22 --log=stderr &
-          sleep 10 # Give ngrok some time to start
+          Start-Process -FilePath ".\ngrok.exe" -ArgumentList "tcp 22 --log=stderr" -NoNewWindow
+          Start-Sleep -Seconds 10 # Give ngrok some time to start
 
           # Get the public URL from the ngrok API and print it
-          # Added retries to make it more reliable
-          for i in {1..5}; do
-            PUBLIC_URL=$(curl -s http://localhost:4040/api/tunnels | jq -r '.tunnels[] | select(.proto=="tcp") | .public_url')
-            if [ -n "$PUBLIC_URL" ]; then
-              break
-            fi
-            echo "Waiting for ngrok tunnel to be ready... (attempt $i)"
-            sleep 5
-          done
+          $ngrokApiUrl = "http://localhost:4040/api/tunnels"
+          $publicUrl = ""
+          for ($i = 1; $i -le 5; $i++) {
+              try {
+                  $response = Invoke-RestMethod -Uri $ngrokApiUrl -ErrorAction Stop
+                  $publicUrl = $response.tunnels | Where-Object { $_.proto -eq "tcp" } | Select-Object -ExpandProperty public_url
+                  if ($publicUrl) {
+                      break
+                  }
+              } catch {
+                  Write-Host "Error fetching ngrok tunnel info: $_"
+              }
+              Write-Host "Waiting for ngrok tunnel to be ready... (attempt $i)"
+              Start-Sleep -Seconds 5
+          }
 
-          if [ -z "$PUBLIC_URL" ]; then
-            echo "Error: Could not get ngrok public URL after several attempts."
-            exit 1
-          fi
+          if (-not $publicUrl) {
+              Write-Host "Error: Could not get ngrok public URL after several attempts."
+              exit 1
+          }
 
-          echo "=========================================================================="
-          echo "✅ ngrok tunnel is live! Connect using the command below."
-          echo "To connect from your terminal (like Termux), use:"
-          echo "ssh runner@${PUBLIC_URL#tcp://}"
-          echo "The password is the one you set in the workflow file."
-          echo "=========================================================================="
+          Write-Host "=========================================================================="
+          Write-Host "✅ ngrok tunnel is live! Connect using the command below."
+          Write-Host "To connect from your terminal, use:"
+          Write-Host "ssh runner@$($publicUrl.Replace('tcp://', ''))"
+          Write-Host "The password is the one you set in the workflow file."
+          Write-Host "=========================================================================="
+        shell: powershell
           
       - name: Keep Action Alive
         run: |
-          echo "Action is running. Press Ctrl+C or cancel the workflow in GitHub to stop it."
+          Write-Host "Action is running. Press Ctrl+C or cancel the workflow in GitHub to stop it."
           # This keeps the runner alive for 6 hours (GitHub's max time for a job)
-          sleep 21600
+          Start-Sleep -Seconds 21600
+        shell: powershell
