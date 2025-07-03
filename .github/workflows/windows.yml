@@ -39,7 +39,7 @@ jobs:
 
           # Add your ngrok authtoken from GitHub Secrets
           # IMPORTANT: Store this as a GitHub Secret named NGROK_AUTHTOKEN
-          .\ngrok.exe config add-authtoken ${{ secrets.NGROK_AUTHTOKEN }}
+          .\ngrok.exe authtoken ${{ secrets.NGROK_AUTHTOKEN }}
           
           # Start ngrok in the background to expose SSH port 22
           Start-Process -FilePath ".\ngrok.exe" -ArgumentList "tcp 22 --log=stderr" -NoNewWindow
