@@ -20,11 +20,10 @@ jobs:
 
           # Create a new user 'runner' and add to Administrators group
           # IMPORTANT: Change 'YOUR_STRONG_PASSWORD' to a secure password
-          try {
-              $user = [ADSI]"WinNT://localhost/runner,user"
+          if (Get-LocalUser -Name "runner" -ErrorAction SilentlyContinue) {
               Write-Host "User 'runner' already exists. Resetting password to be safe."
               net user runner YOUR_STRONG_PASSWORD
-          } catch {
+          } else {
               Write-Host "User 'runner' does not exist. Creating now..."
               net user runner YOUR_STRONG_PASSWORD /add
               net localgroup administrators runner /add
