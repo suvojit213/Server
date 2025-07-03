@@ -37,6 +37,9 @@ jobs:
           Invoke-WebRequest -Uri "https://bin.equinox.io/c/4VmDzA7iaHb/ngrok-stable-windows-amd64.zip" -OutFile "ngrok.zip"
           Expand-Archive -Path "ngrok.zip" -DestinationPath "."
 
+          # Update ngrok to the latest version
+          .\ngrok.exe update
+
           # Add your ngrok authtoken from GitHub Secrets
           # IMPORTANT: Store this as a GitHub Secret named NGROK_AUTHTOKEN
           .\ngrok.exe authtoken ${{ secrets.NGROK_AUTHTOKEN }}
