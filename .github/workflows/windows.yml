@@ -20,13 +20,14 @@ jobs:
 
           # Create a new user 'runner' and add to Administrators group
           # IMPORTANT: Change 'YOUR_STRONG_PASSWORD' to a secure password
+          $password = ConvertTo-SecureString "YOUR_STRONG_PASSWORD" -AsPlainText -Force
           if (Get-LocalUser -Name "runner" -ErrorAction SilentlyContinue) {
               Write-Host "User 'runner' already exists. Resetting password to be safe."
-              net user runner YOUR_STRONG_PASSWORD
+              (Get-LocalUser -Name "runner").SetPassword($password)
           } else {
               Write-Host "User 'runner' does not exist. Creating now..."
-              net user runner YOUR_STRONG_PASSWORD /add
-              net localgroup administrators runner /add
+              New-LocalUser -Name "runner" -Password $password -FullName "GitHub Actions Runner" -Description "User for GitHub Actions SSH access"
+              Add-LocalGroupMember -Group "Administrators" -Member "runner"
           }
         shell: powershell
 
